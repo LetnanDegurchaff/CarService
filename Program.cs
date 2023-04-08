@@ -3,14 +3,12 @@ using System.Collections.Generic;
 
 namespace CarService
 {
-    static class UserUtils
+    class UserUtils
     {
-        private static Random _random = new Random();
+        static private Random _random = new Random();
 
-        public static int GenerateRandomNumber(int min, int max)
-        {
-            return _random.Next(min, max);
-        }
+        static public int GenerateRandomNumber(int min, int max) =>
+            _random.Next(min, max);
 
         public static void WriteColoredText(string text, ConsoleColor color)
         {
@@ -32,104 +30,204 @@ namespace CarService
 
     class CarService
     {
-        private const float WorkCostCoefficient = 1.2f;
-        private const int Penalty = 20;
-
         private const string AcceptCommand = "1";
         private const string RefuseCommand = "2";
 
-        private int _money;
-        private Dictionary<Type, Queue<Detail>> _detailsSections;
-        private Dictionary<Type, Func<Detail>> _detailsCreators;
-        private Queue<Car> _clientsCars;
+        private Dictionary<string, Container> _detailsContainers = new Dictionary<string, Container>();
+        private DetailCreator _detailCreator = new DetailCreator();
+        private Queue<Car> _cars = new Queue<Car>();
 
-        private DetailCreater _detailCreator;
-        private CarCreater _carCreater;
+        private int _money = 300;
+        private int _penalty = 50;
+        private float _workCostCoefficient = 1.2f;
+        private int _defaultContainersDetailCount = 10;
 
         public CarService()
         {
-            Initialize();
-            FillStorage();
+            IReadOnlyDetail[] detailsList = _detailCreator.CreateDetails();
+
+            foreach (IReadOnlyDetail detail in detailsList)
+            {
+                _detailsContainers.Add(
+                    detail.Name,
+                    new Container(detail.CreateClone(), _defaultContainersDetailCount));
+            }
         }
+
+        private bool IsNegativeBalance => _money <= 0;
 
         public void Work()
         {
-            LetClientsIn();
-            ShowStorage();
+            bool IsWantContinue = true;
+            bool isInputCorrect;
 
-            while (_clientsCars.Count > 0)
+            do
             {
-                bool isInputCorrect;
+                BuyDetails();
+                InviteClients();
+
+                while (_cars.Count > 0)
+                {
+                    Console.Clear();
+
+                    ShowBaseInfo();
+                    ShowStorage();
+                    ShowClientCarInfo();
+
+                    Car car = _cars.Dequeue();
+
+                    do
+                    {
+                        isInputCorrect = true;
+
+                        Console.WriteLine($"Вы желаете взяться за ремонт? " +
+                            $"(Да - {AcceptCommand} | Нет - {RefuseCommand})");
+                        string input = Console.ReadLine();
+
+                        switch (input)
+                        {
+                            case AcceptCommand:
+                                RepairCar(car);
+                                break;
+
+                            case RefuseCommand:
+                                RefuseRepair();
+                                break;
+
+                            default:
+                                isInputCorrect = false;
+                                break;
+                        }
+
+                        UserUtils.WriteColoredText("Команда не верна", ConsoleColor.Red);
+                    }
+                    while (isInputCorrect == false);
+                }
 
                 Console.Clear();
 
-                ShowBaseInfo();
-                ShowStorage();
-                ShowClientCarInfo();
-
-                Car clientCar = _clientsCars.Dequeue();
-
-                do
+                if (IsNegativeBalance)
                 {
-                    isInputCorrect = true;
-                    string input = Console.ReadLine();
-
-                    switch (input)
+                    Console.WriteLine("Вы проиграли");
+                }
+                else
+                {
+                    do
                     {
-                        case AcceptCommand:
-                            RepairCar(clientCar);
-                            break;
-                        case RefuseCommand:
-                            RefuseRepair();
-                            break;
-                        default:
-                            isInputCorrect = false;
-                            break;
+                        isInputCorrect = true;
+
+                        Console.Clear();
+
+                        Console.WriteLine("Рабочий день окончен, продолжить работу? " +
+                        $"(Да - {AcceptCommand} | Нет - {RefuseCommand})");
+
+                        string input = Console.ReadLine();
+
+                        switch (input)
+                        {
+                            case AcceptCommand:
+                                continue;
+
+                            case RefuseCommand:
+                                IsWantContinue = false;
+                                break;
+
+                            default:
+                                isInputCorrect = false;
+                                break;
+                        }
+
+                        UserUtils.WriteColoredText("Команда не верна", ConsoleColor.Red);
                     }
-
-                    UserUtils.WriteColoredText("Команда не верна", ConsoleColor.Red);
+                    while (isInputCorrect == false);
                 }
-                while (isInputCorrect == false);
             }
+            while (IsWantContinue && (IsNegativeBalance == false));
         }
 
-        private void FillStorage()
+        private void BuyDetails()
         {
-            int minCertainDetailCount = 1;
-            int maxCertainDetailCount = 5;
-            int certainDetailCount;
+            bool isInputCorrect = true;
+            List<string> detailsNames = new List<string>();
 
-            foreach (KeyValuePair<Type, Queue<Detail>> detailsSection in _detailsSections)
+            foreach (string detailName in _detailsContainers.Keys)
             {
-                certainDetailCount = UserUtils.GenerateRandomNumber(minCertainDetailCount, maxCertainDetailCount + 1);
+                detailsNames.Add(detailName);
+            }
 
-                for (int i = 0; i < certainDetailCount; i++)
+            do
+            {
+                Console.Clear();
+
+                ShowStorage();
+                UserUtils.WriteColoredText($"\nБалланс: {_money}", ConsoleColor.Cyan);
+                UserUtils.WriteColoredText("\nМеню покупки деталей:", ConsoleColor.Yellow);
+
+                for (int i = 0; i < detailsNames.Count; i++)
                 {
-                    detailsSection.Value.Enqueue(_detailsCreators[detailsSection.Key]());
+                    int detailNameIndex = i + 1;
+                    Console.WriteLine($"{detailNameIndex}) {detailsNames[i]}\t" +
+                        $"{_detailsContainers[detailsNames[i]].DetailCost}");
                 }
+
+                Console.WriteLine($"Введите номер детали чтобы купить одну или введите не число, чтобы продолжить");
+
+                int inputNumber;
+
+                if (int.TryParse(Console.ReadLine(), out inputNumber))
+                {
+                    if (inputNumber > 0 && inputNumber <= detailsNames.Count)
+                    {
+                        inputNumber--;
+
+                        if (_detailsContainers[detailsNames[inputNumber]].IsFull == false)
+                        {
+                            _detailsContainers[detailsNames[inputNumber]].IncreaseCount();
+                            _money -= _detailsContainers[detailsNames[inputNumber]].DetailCost;
+                        }
+                    }
+                }
+                else
+                {
+                    isInputCorrect = false;
+                }
+            }
+            while (isInputCorrect);
+        }
+
+        private void ShowStorage()
+        {
+            int detailIndex = 1;
+
+            UserUtils.WriteColoredText("Содержимое хранилища:", ConsoleColor.Green);
+
+            foreach (KeyValuePair<string, Container> detailSection in _detailsContainers)
+            {
+                Console.WriteLine($" {detailIndex})\t" +
+                    $"{detailSection.Key}  \t\t" +
+                    $"{detailSection.Value.Count} шт.");
+                detailIndex++;
             }
         }
 
-        private void Initialize()
+        private void ShowClientCarInfo()
         {
-            _detailsSections = new Dictionary<Type, Queue<Detail>>();
-            _clientsCars = new Queue<Car>();
-            _detailCreator = new DetailCreater();
-            _carCreater = new CarCreater();
+            Car clientCar = _cars.Peek();
+            IReadOnlyDetail brokenDetail = clientCar.GetBrokenDetail();
 
-            _money = 500;
+            Console.Write("\nУ клиента сломано: ");
+            UserUtils.WriteColoredText(brokenDetail.Name, ConsoleColor.Red);
 
-            _detailsCreators = new Dictionary<Type, Func<Detail>>();
+            float workCost = brokenDetail.Cost * _workCostCoefficient;
+            UserUtils.WriteColoredText($"Стоимость ремонта: {workCost}", ConsoleColor.Green);
+        }
 
-            _detailsCreators.Add(typeof(Engine), _detailCreator.Create<Engine>);
-            _detailsCreators.Add(typeof(GearBox), _detailCreator.Create<GearBox>);
-            _detailsCreators.Add(typeof(Suspension), _detailCreator.Create<Suspension>);
+        private void ShowBaseInfo()
+        {
+            UserUtils.WriteColoredText("\t\tДобро пожаловать в автомастерскую", ConsoleColor.Green);
 
-            foreach (Type detailType in _detailsCreators.Keys)
-            {
-                _detailsSections.Add(detailType,
-                    new Queue<Detail>());
-            }
+            Console.WriteLine($"Клиентов в очереди: {_cars.Count}");
+            UserUtils.WriteColoredText($"Балланс: {_money}\n", ConsoleColor.Cyan);
         }
 
         private void RepairCar(Car car)
@@ -146,7 +244,7 @@ namespace CarService
                 int selectedDetailNumber = GetNumber();
                 isInputCorrect = true;
 
-                if (selectedDetailNumber > 0 && selectedDetailNumber <= _detailsSections.Count)
+                if (selectedDetailNumber > 0 && selectedDetailNumber <= _detailsContainers.Count)
                 {
                     ReplaceDetail(selectedDetailNumber, car);
                 }
@@ -159,86 +257,78 @@ namespace CarService
             while (isInputCorrect == false);
         }
 
-        private void RefuseRepair()
-        {
-            PayPenalty();
-            Console.WriteLine("Вы отказались обслуживать клиента, " +
-                 $"вы выплачиваете штраф {Penalty} единиц условной валюты");
-
-            Console.ReadLine();
-        }
-
         private void ReplaceDetail(int selectedDetailNumber, Car car)
         {
+            IReadOnlyDetail brokenDetail = car.GetBrokenDetail();
+
             int selectedDetailIndex = --selectedDetailNumber;
-            float workCost = car.GetBrokenDetailCost() * WorkCostCoefficient;
+            float workCost = brokenDetail.Cost * _workCostCoefficient;
 
-            List<Type> detailsTypes = new List<Type>();
+            List<string> detailsTypes = new List<string>();
 
-            foreach (Type detailSectionType in _detailsSections.Keys)
+            foreach (string detailSectionType in _detailsContainers.Keys)
             {
                 detailsTypes.Add(detailSectionType);
             }
 
-            if (car.GetBrokenDetailName() == detailsTypes[selectedDetailIndex].Name)
+            if (brokenDetail.Name == detailsTypes[selectedDetailIndex])
             {
-                Detail repairedDetail = car.GetSelectedDetail(selectedDetailIndex);
-                repairedDetail = _detailsSections[detailsTypes[selectedDetailIndex]].Dequeue();
-                TakeMoney(Convert.ToInt32(workCost));
-                Console.WriteLine("Вы поменяли неисправную деталь, " +
-                    $"вы получаете {workCost} единиц условной валюты");
+                IReadOnlyDetail repairedDetail = car.GetSelectedDetail(selectedDetailIndex);
+
+                if (TryGetNewDetail(_detailsContainers[detailsTypes[selectedDetailIndex]], ref repairedDetail))
+                {
+                    TakeMoney(Convert.ToInt32(workCost));
+                    Console.WriteLine("Вы поменяли неисправную деталь, " +
+                        $"вы получаете {workCost} единиц условной валюты");
+                }
+                else
+                {
+                    Console.WriteLine("У вас на складе нет таких деталей, " +
+                        $"вы получаете {workCost} единиц условной валюты");
+                }
             }
             else
             {
                 PayPenalty();
                 Console.WriteLine("Вы пытались поменять исправную деталь, " +
-                    $"вы выплачиваете штраф {Penalty} единиц условной валюты");
+                    $"вы выплачиваете штраф {_penalty} единиц условной валюты");
             }
 
             Console.ReadLine();
         }
 
-        private void ShowBaseInfo()
+        private void RefuseRepair()
         {
-            UserUtils.WriteColoredText("\t\tДобро пожаловать в автомастерскую", ConsoleColor.Green);
+            PayPenalty();
+            Console.WriteLine("Вы отказались обслуживать клиента, " +
+                 $"вы выплачиваете штраф {_penalty} единиц условной валюты");
 
-            Console.WriteLine($"Клиентов в очереди: {_clientsCars.Count}");
-            UserUtils.WriteColoredText($"Балланс: {_money}\n", ConsoleColor.Cyan);
+            Console.ReadLine();
         }
 
-        private void ShowStorage()
+        private bool TryGetNewDetail(Container detailsContainer, ref IReadOnlyDetail repairedDetail)
         {
-            int detailIndex = 1;
-
-            UserUtils.WriteColoredText("Содержимое хранилища:", ConsoleColor.Green);
-
-            foreach (KeyValuePair<Type, Queue<Detail>> detailSection in _detailsSections)
+            if (detailsContainer.Count > 0)
             {
-                Console.WriteLine($" {detailIndex})\t{detailSection.Key.Name}  \t\t{detailSection.Value.Count} шт.");
-                detailIndex++;
+                detailsContainer.DecreaseCount();
+                repairedDetail = _detailCreator.CreateDetail(repairedDetail.Name);
+                return true;
             }
+
+            return false;
         }
 
-        private void ShowClientCarInfo()
+        private void InviteClients()
         {
-            Car clientCar = _clientsCars.Peek();
-            Console.Write("\nУ клиента сломано: ");
-            UserUtils.WriteColoredText(clientCar.GetBrokenDetailName(), ConsoleColor.Red);
+            int minClientsCount = 5;
+            int maxClientsCount = 10;
 
-            float workCost = clientCar.GetBrokenDetailCost() * WorkCostCoefficient;
-            UserUtils.WriteColoredText($"Стоимость ремонта: {workCost}", ConsoleColor.Green);
-            Console.WriteLine($"Вы желаете взяться за ремонт? (Да - {AcceptCommand} | Нет - {RefuseCommand})");
-        }
+            int clientsCount = UserUtils.GenerateRandomNumber
+                (minClientsCount, maxClientsCount - 1);
 
-        private void LetClientsIn()
-        {
-            int minCustomers = 5;
-            int maxCustomers = 10;
-            int IncomingCustomers = UserUtils.GenerateRandomNumber(minCustomers, maxCustomers + 1);
-
-            for (int i = 0; i < IncomingCustomers; i++)
+            for (int i = 0; i < clientsCount; i++)
             {
-                _clientsCars.Enqueue(_carCreater.CreateBrokenCar());
+                _cars.Enqueue(new Car());
             }
         }
 
@@ -252,122 +342,150 @@ namespace CarService
             return number;
         }
 
+        private void PayPenalty()
+        {
+            _money -= _penalty;
+        }
+
         private void TakeMoney(int money)
         {
             _money += money;
-        }
-
-        private void PayPenalty()
-        {
-            _money -= Penalty;
         }
     }
 
     class Car
     {
-        private List<Detail> _details;
+        private IReadOnlyDetail[] _details;
 
-        public Car(Detail engine, Detail gearBox, Detail suspension)
+        public Car()
         {
-            _details = new List<Detail>
-            {
-                engine, gearBox, suspension
-            };
+            DetailCreator detailCreator = new DetailCreator();
+
+            _details = detailCreator.CreateBrokenCarDetails();
         }
 
-        public Detail GetSelectedDetail(int selectedDetailIndex)
+        public IReadOnlyDetail GetBrokenDetail()
         {
-            return _details[selectedDetailIndex];
-        }
-
-        public int GetBrokenDetailCost()
-        {
-            foreach (Detail detail in _details)
+            foreach (IReadOnlyDetail detail in _details)
             {
                 if (detail.IsWorkable == false)
-                    return detail.Cost;
-            }
-
-            return 0;
-        }
-
-        public string GetBrokenDetailName()
-        {
-            foreach (Detail detail in _details)
-            {
-                if (detail.IsWorkable == false)
-                    return detail.GetType().Name;
+                    return detail;
             }
 
             return null;
         }
 
-        public void BrokeRandomDetail()
+        public IReadOnlyDetail GetSelectedDetail(int selectedDetailIndex)
         {
-            int brokedDetailNumber = UserUtils.GenerateRandomNumber(0, _details.Count);
-
-            _details[brokedDetailNumber].Broke();
+            return _details[selectedDetailIndex];
         }
     }
 
-    class CarCreater
+    class Container
     {
-        private DetailCreater _detailCreater;
+        public const int MaxDetailsCount = 15;
 
-        public CarCreater()
+        private IReadOnlyDetail _detail;
+
+        public Container(IReadOnlyDetail detail, int count)
         {
-            _detailCreater = new DetailCreater();
+            _detail = detail;
+            Count = count;
         }
 
-        public Car CreateBrokenCar()
+        public int Count { get; private set; }
+        public int DetailCost => _detail.Cost;
+        public bool IsFull => Count == MaxDetailsCount;
+
+        public void IncreaseCount()
         {
-            Car car = new Car(
-                _detailCreater.Create<Engine>(),
-                _detailCreater.Create<GearBox>(),
-                _detailCreater.Create<Suspension>());
+            if (Count < MaxDetailsCount)
+                Count++;
+        }
 
-            car.BrokeRandomDetail();
-
-            return car;
+        public void DecreaseCount()
+        {
+            if (Count > 0)
+                Count--;
         }
     }
 
-    abstract class Detail
+    interface IReadOnlyDetail
     {
-        public Detail(int cost)
+        string Name { get; }
+        int Cost { get; }
+        bool IsWorkable { get; }
+
+        Detail CreateClone();
+    }
+
+    class Detail : IReadOnlyDetail
+    {
+        public Detail(string name, int cost)
         {
+            Name = name;
             Cost = cost;
             IsWorkable = true;
         }
+
+        private Detail(string name, int cost, bool isWorkable)
+        {
+            Name = name;
+            Cost = cost;
+            IsWorkable = isWorkable;
+        }
+
+        public string Name { get; private set; }
         public int Cost { get; private set; }
         public bool IsWorkable { get; private set; }
 
-        public void Broke()
+        public Detail CreateClone() => new Detail(Name, Cost, IsWorkable);
+
+        public void Broke() => IsWorkable = false;
+    }
+
+    class DetailCreator
+    {
+        private Detail[] _details =
         {
-            IsWorkable = false;
+            new Detail("Двигатель", 200),
+            new Detail("Трансмиссия", 120),
+            new Detail("Подвеска", 70)
+        };
+
+        public IReadOnlyDetail[] CreateDetails()
+        {
+            IReadOnlyDetail[] details = new IReadOnlyDetail[_details.Length];
+
+            for (int i = 0; i < _details.Length; i++)
+                details[i] = _details[i].CreateClone();
+
+            return details;
         }
-    }
 
-    class Engine : Detail
-    {
-        public Engine() : base(150) { }
-    }
-
-    class GearBox : Detail
-    {
-        public GearBox() : base(150) { }
-    }
-
-    class Suspension : Detail
-    {
-        public Suspension() : base(150) { }
-    }
-
-    class DetailCreater
-    {
-        public T Create<T>() where T : Detail, new()
+        public IReadOnlyDetail[] CreateBrokenCarDetails()
         {
-            return new T();
+            Detail[] details = new Detail[_details.Length];
+            int brokenDetail = UserUtils.GenerateRandomNumber(0, _details.Length);
+
+            for (int i = 0; i < _details.Length; i++)
+            {
+                details[i] = _details[i].CreateClone();
+
+                if (i == brokenDetail)
+                    details[i].Broke();
+            }
+
+            return details;
+        }
+
+        public IReadOnlyDetail CreateDetail(string name)
+        {
+            foreach (IReadOnlyDetail detail in _details)
+                if (detail.Name == name)
+                    return detail.CreateClone();
+
+            return null;
         }
     }
 }
