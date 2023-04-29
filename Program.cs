@@ -106,11 +106,7 @@ namespace CarService
 
                 Console.Clear();
 
-                if (IsNegativeBalance)
-                {
-                    Console.WriteLine("Вы проиграли");
-                }
-                else
+                if (IsNegativeBalance == false)
                 {
                     do
                     {
@@ -140,6 +136,11 @@ namespace CarService
                         UserUtils.WriteColoredText("Команда не верна", ConsoleColor.Red);
                     }
                     while (isInputCorrect == false);
+                }
+                else
+                {
+                    Console.WriteLine("Вы проиграли");
+                    Console.ReadLine();
                 }
             }
             while (IsWantContinue && (IsNegativeBalance == false));
